@@ -29,6 +29,37 @@ wget https://github.com/derailed/k9s/releases/latest/download/k9s_linux_amd64.de
 k3d cluster create --config k3d-cluster/k3d-local-cluster.yaml
 ```
 
+k3d merges the new context into `~/.kube/config` and switches to it. List or swap contexts with `kubectx`.
+
+Delete the cluster when done:
+
+```sh
+k3d cluster delete local
+```
+
+### Multiple kubeconfigs
+
+If `$KUBECONFIG` has multiple paths (e.g. `foo.yaml:~/.kube/config`), k3d can't decide which file to update and warns on create/delete. Prefix both commands to scope the write:
+
+```sh
+KUBECONFIG=~/.kube/config k3d cluster create --config k3d-cluster/k3d-local-cluster.yaml
+KUBECONFIG=~/.kube/config k3d cluster delete local
+```
+
+Or add a shell alias in `~/.zshrc` / `~/.bashrc`:
+
+```sh
+alias k3d='KUBECONFIG=~/.kube/config k3d'
+```
+
+If stale entries got left behind from an un-prefixed delete, clean them manually:
+
+```sh
+KUBECONFIG=~/.kube/config kubectl config delete-context k3d-local
+KUBECONFIG=~/.kube/config kubectl config delete-cluster k3d-local
+KUBECONFIG=~/.kube/config kubectl config delete-user    admin@k3d-local
+```
+
 ## References
 
 - [k3d releases](https://k3d.io/stable/#releases) · [config file](https://k3d.io/stable/usage/configfile/#introduction)

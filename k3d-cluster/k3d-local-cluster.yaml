@@ -1,7 +1,7 @@
 apiVersion: k3d.io/v1alpha5
 kind: Simple
 metadata:
-  name: my-k3d-cluster
+  name: local
 servers: 1
 agents: 2
 image: rancher/k3s:v1.33.10-k3s1
@@ -37,4 +37,4 @@ options:
         nodeFilters: [agent:*]
   kubeconfig:
     updateDefaultKubeconfig: true
-    switchCurrentContext: false
+    switchCurrentContext: true
