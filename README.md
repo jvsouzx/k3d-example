@@ -1,8 +1,21 @@
 # k3d example
 
-Minimal [k3d](https://k3d.io) cluster config and setup notes.
+Minimal [k3d](https://k3d.io) cluster config plus a sample app deployed via Kustomize + Sealed Secrets.
 
 > Requires Linux and Docker ≥ 20.0.0.
+
+## Layout
+
+```
+.
+├── clusters/local/         # k3d config + cluster bootstrap (CNPG, Sealed Secrets)
+│   ├── bootstrap/
+│   └── local.yaml
+└── apps/                   # applications deployed to the cluster
+    └── fullstack-template/
+        ├── base/
+        └── overlays/local/
+```
 
 ## Setup
 
@@ -21,15 +34,24 @@ sudo apt install kubectx
 wget https://github.com/derailed/k9s/releases/latest/download/k9s_linux_amd64.deb \
   && sudo apt install ./k9s_linux_amd64.deb \
   && rm k9s_linux_amd64.deb
+
+# kubeseal (CLI for Sealed Secrets)
+KUBESEAL_VERSION=$(curl -s https://api.github.com/repos/bitnami-labs/sealed-secrets/releases/latest | jq -r .tag_name | sed 's/^v//')
+curl -LO "https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz"
+tar -xzf "kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz" kubeseal
+sudo install -m 755 kubeseal /usr/local/bin/kubeseal
+rm kubeseal "kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz"
 ```
 
 ## Usage
 
 ```sh
-k3d cluster create --config k3d-cluster/k3d-local-cluster.yaml
+k3d cluster create --config clusters/local/local.yaml
 ```
 
 k3d merges the new context into `~/.kube/config` and switches to it. List or swap contexts with `kubectx`.
+
+Once the cluster is up, see [apps/README.md](apps/README.md) for the bootstrap (CNPG operator + Sealed Secrets controller) and the application deploy flow.
 
 Delete the cluster when done:
 
@@ -42,7 +64,7 @@ k3d cluster delete local
 If `$KUBECONFIG` has multiple paths (e.g. `foo.yaml:~/.kube/config`), k3d can't decide which file to update and warns on create/delete. Prefix both commands to scope the write:
 
 ```sh
-KUBECONFIG=~/.kube/config k3d cluster create --config k3d-cluster/k3d-local-cluster.yaml
+KUBECONFIG=~/.kube/config k3d cluster create --config clusters/local/local.yaml
 KUBECONFIG=~/.kube/config k3d cluster delete local
 ```
 

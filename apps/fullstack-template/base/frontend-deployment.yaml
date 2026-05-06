@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: ft
+  labels:
+    app: fullstack-template
+    component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fullstack-template
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: fullstack-template
+        component: frontend
+    spec:
+      containers:
+      - name: fullstack-template-frontend
+        image: ft-frontend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: ft
+spec:
+  type: ClusterIP
+  selector:
+    app: fullstack-template
+    component: frontend
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+ 

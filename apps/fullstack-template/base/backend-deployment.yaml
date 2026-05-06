@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: ft
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fullstack-template
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: fullstack-template
+        component: backend
+    spec:
+      initContainers:
+      - name: prestart
+        image: ft-backend:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "/app/backend/scripts/prestart.sh"]
+        envFrom:
+        - configMapRef:
+            name: environment-configs
+        - secretRef:
+            name: environment-credentials
+        env:
+        - name: POSTGRES_SERVER
+          valueFrom:
+            secretKeyRef:
+              name: ft-postgres-app
+              key: host
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: ft-postgres-app
+              key: port
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: ft-postgres-app
+              key: dbname
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: ft-postgres-app
+              key: user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ft-postgres-app
+              key: password
+      containers:
+      - name: backend
+        image: ft-backend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: environment-configs
+        - secretRef:
+            name: environment-credentials
+        env:
+        - name: POSTGRES_SERVER
+          valueFrom:
+            secretKeyRef:
+              name: ft-postgres-app
+              key: host
+        - name: POSTGRES_PORT
+          valueFrom:
+            secretKeyRef:
+              name: ft-postgres-app
+              key: port
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: ft-postgres-app
+              key: dbname
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: ft-postgres-app
+              key: user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ft-postgres-app
+              key: password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: ft
+spec:
+  type: ClusterIP
+  selector:
+    app: fullstack-template
+    component: backend
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000

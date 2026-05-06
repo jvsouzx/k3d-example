@@ -16,7 +16,8 @@ ports:
 hostAliases:
   - ip: 127.0.0.1
     hostnames:
-      - app.teste.local
+      - app.template.local
+      - api.template.local
 registries:
   create:
     name: registry.localhost
