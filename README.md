@@ -1,6 +1,6 @@
 # k3d example
 
-Minimal [k3d](https://k3d.io) cluster config plus a sample app deployed via Kustomize + Sealed Secrets.
+Minimal [k3d](https://k3d.io) cluster config plus a sample app deployed via Kustomize, with secrets managed by OpenBao + External Secrets Operator.
 
 > Requires Linux and Docker ≥ 20.0.0.
 
@@ -8,8 +8,10 @@ Minimal [k3d](https://k3d.io) cluster config plus a sample app deployed via Kust
 
 ```
 .
-├── clusters/local/         # k3d config + cluster bootstrap (CNPG, Sealed Secrets)
+├── clusters/local/         # k3d config + cluster bootstrap (CNPG, OpenBao, ESO)
 │   ├── bootstrap/
+│   │   ├── kustomization.yaml
+│   │   └── openbao/        # OpenBao Helm values + RBAC + ClusterSecretStore
 │   └── local.yaml
 └── apps/                   # applications deployed to the cluster
     └── fullstack-template/
@@ -35,12 +37,12 @@ wget https://github.com/derailed/k9s/releases/latest/download/k9s_linux_amd64.de
   && sudo apt install ./k9s_linux_amd64.deb \
   && rm k9s_linux_amd64.deb
 
-# kubeseal (CLI for Sealed Secrets)
-KUBESEAL_VERSION=$(curl -s https://api.github.com/repos/bitnami-labs/sealed-secrets/releases/latest | jq -r .tag_name | sed 's/^v//')
-curl -LO "https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz"
-tar -xzf "kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz" kubeseal
-sudo install -m 755 kubeseal /usr/local/bin/kubeseal
-rm kubeseal "kubeseal-${KUBESEAL_VERSION}-linux-amd64.tar.gz"
+# helm (used to install OpenBao and External Secrets Operator)
+curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+sudo apt-get install apt-transport-https --yes
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" \
+  | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+sudo apt-get update && sudo apt-get install helm
 ```
 
 ## Usage
@@ -51,7 +53,7 @@ k3d cluster create --config clusters/local/local.yaml
 
 k3d merges the new context into `~/.kube/config` and switches to it. List or swap contexts with `kubectx`.
 
-Once the cluster is up, see [apps/README.md](apps/README.md) for the bootstrap (CNPG operator + Sealed Secrets controller) and the application deploy flow.
+Once the cluster is up, see [apps/README.md](apps/README.md) for the bootstrap (CNPG operator, OpenBao, External Secrets Operator) and the application deploy flow.
 
 Delete the cluster when done:
 

@@ -17,12 +17,12 @@ apps/
 │   │   └── namespace.yaml
 │   └── overlays
 │       └── local
-│           ├── kustomization.yaml
-│           └── sealed-secret.yaml
+│           ├── external-secret.yaml
+│           └── kustomization.yaml
 └── README.md
 ```
 
-`base/` holds the generic resources (namespace, configmap, deployments, ingress, CNPG Cluster). `overlays/local/` extends the base and adds the `SealedSecret`, the `SealedSecret` lives in the overlay because it's bound to the cluster's controller key.
+`base/` holds the generic resources (namespace, configmap, deployments, ingress, CNPG Cluster). `overlays/local/` extends the base and adds the `ExternalSecret`, which lives in the overlay because the OpenBao path it pulls from is environment-specific.
 
 ## 1. Build the images
 
@@ -64,47 +64,142 @@ k3d image import ft-frontend:latest ft-backend:latest -c local
 ```
 127.0.0.1 app.template.local
 127.0.0.1 api.template.local
+127.0.0.1 bao.local
 ```
 
 The k3d loadbalancer maps `8080:80`, so use:
 
 - Frontend: <http://app.template.local:8080>
 - API: <http://api.template.local:8080>
+- OpenBao UI: <http://bao.local:8080>
 
 ## 3. Cluster bootstrap (once per cluster)
 
-Installs the CloudNativePG operator and the Sealed Secrets controller, defined in [../clusters/local/bootstrap/kustomization.yaml](../clusters/local/bootstrap/kustomization.yaml):
+Installs the CloudNativePG operator, defined in [../clusters/local/bootstrap/kustomization.yaml](../clusters/local/bootstrap/kustomization.yaml):
 
 ```sh
-# (optional) restore the master key BEFORE the controller starts,
-# to reuse SealedSecrets already committed from previous clusters
-kubectl apply -f ~/.kube-backups/k3d-local/sealed-secrets-master.key
-
 kubectl apply -k clusters/local/bootstrap/ --server-side
 ```
 
 `--server-side` is required because the CNPG CRDs are large enough to exceed the 256 KB annotation limit of client-side apply.
 
-If you applied the bootstrap **before** restoring the key, restart the controller pod so it reloads:
+## 4. Secrets management: OpenBao + ESO
+
+Secrets live in OpenBao and are synced into native `Secret`s by [External Secrets Operator](https://external-secrets.io). OpenBao's Helm values (Standalone, file storage, UI, Ingress at `bao.local`) live in [../clusters/local/bootstrap/openbao/values.yaml](../clusters/local/bootstrap/openbao/values.yaml).
+
+### 4.1 Install ESO and OpenBao
 
 ```sh
-kubectl -n kube-system delete pod -l name=sealed-secrets-controller
+# ESO
+helm repo add external-secrets https://charts.external-secrets.io
+helm install external-secrets external-secrets/external-secrets \
+  -n external-secrets --create-namespace --version 0.20.4
+
+# OpenBao
+helm repo add openbao https://openbao.github.io/openbao-helm
+helm repo update
+helm install openbao openbao/openbao \
+  -n openbao --create-namespace \
+  -f clusters/local/bootstrap/openbao/values.yaml
+
+# Grant OpenBao's SA permission to call TokenReview (required by Kubernetes auth)
+kubectl apply -f clusters/local/bootstrap/openbao/auth-delegator.yaml
 ```
 
-### Master key backup
+### 4.2 Initialize and unseal OpenBao
 
-Without a backup, deleting and recreating the cluster generates a fresh keypair in the controller, so every committed `SealedSecret` has to be re-sealed. Back it up once (and refresh whenever the key is rotated):
+The `openbao-0` pod stays `0/1` Ready until you init and unseal:
 
 ```sh
-mkdir -p ~/.kube-backups/k3d-local
-kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml \
-  > ~/.kube-backups/k3d-local/sealed-secrets-master.key
-chmod 600 ~/.kube-backups/k3d-local/sealed-secrets-master.key
+# init — prints 5 unseal keys + the initial root token. SAVE THEM.
+kubectl -n openbao exec -ti openbao-0 -- bao operator init
+
+# unseal — repeat 3 times with 3 distinct keys
+kubectl -n openbao exec -ti openbao-0 -- bao operator unseal
 ```
 
-> This file is equivalent to having **every secret in plaintext**. Never commit it to Git or store it on a shared volume. In production, keep it in a vault (Vault, 1Password, AWS Secrets Manager).
+After the 3rd unseal the pod flips to `1/1` Ready and the UI is reachable at <http://bao.local:8080>.
 
-## 4. Deploy the application
+> The file backend persists data in the PVC, but the unseal keys are **not** stored anywhere by OpenBao — losing them means losing the data. Back them up (password manager, KMS). For production, switch to auto-unseal with a cloud KMS.
+
+### 4.3 Configure OpenBao (KV engine, Kubernetes auth, ESO role)
+
+Open a shell inside the pod and log in with the root token:
+
+```sh
+kubectl -n openbao exec -ti openbao-0 -- sh
+bao login <root_token>
+```
+
+Then, inside the pod:
+
+```sh
+# KV v2 engine at path "secret/"
+bao secrets enable -version=2 -path=secret kv
+
+# Kubernetes auth (uses the pod's SA token to call TokenReview)
+bao auth enable kubernetes
+bao write auth/kubernetes/config \
+  kubernetes_host="https://kubernetes.default.svc.cluster.local"
+
+# Policy: read-only access to secret/data/ft/*
+bao policy write eso-reader - <<EOF
+path "secret/data/ft/*" {
+  capabilities = ["read"]
+}
+EOF
+
+# Role: bind ESO's ServiceAccount to the eso-reader policy
+bao write auth/kubernetes/role/eso \
+  bound_service_account_names=external-secrets \
+  bound_service_account_namespaces=external-secrets \
+  policies=eso-reader \
+  ttl=1h
+
+exit
+```
+
+### 4.4 Apply the `ClusterSecretStore`
+
+```sh
+kubectl apply -f clusters/local/bootstrap/openbao/cluster-secret-store.yaml
+kubectl get clustersecretstore openbao   # STATUS should become "Valid"
+```
+
+If status stays `InvalidProviderConfig`, check `kubectl -n external-secrets logs deploy/external-secrets` — usually a wrong `server` URL, missing `auth-delegator` binding, or a mismatched role/policy.
+
+### 4.5 Seed the app secrets
+
+The app expects 5 keys at `secret/ft/app` (consumed via `envFrom: secretRef: environment-credentials`).
+
+Generate the `SECRET_KEY` **on the host** (the OpenBao image has no `openssl`):
+
+```sh
+SECRET_KEY=$(openssl rand -hex 32)
+echo "$SECRET_KEY"   # copy this
+```
+
+Then, inside the pod:
+
+```sh
+kubectl -n openbao exec -ti openbao-0 -- sh
+bao login <root_token>
+
+bao kv put secret/ft/app \
+  SECRET_KEY="<paste_here>" \
+  FIRST_SUPERUSER="admin@example.com" \
+  FIRST_SUPERUSER_PASSWORD="changeme" \
+  SMTP_USER="" \
+  SMTP_PASSWORD=""
+
+exit
+```
+
+> Shell substitution like `$(openssl ...)` runs **inside** the pod, where `openssl` is absent — it would silently produce an empty `SECRET_KEY`. Generate on the host, paste the literal.
+
+To update later, repeat `bao kv put` (replaces all keys) or use `bao kv patch` (merges).
+
+## 5. Deploy the application
 
 ```sh
 kubectl apply -k apps/fullstack-template/overlays/local/
@@ -113,40 +208,9 @@ kubectl apply -k apps/fullstack-template/overlays/local/
 Verify:
 
 ```sh
-kubectl -n ft get pods,svc,ingress,sealedsecret
+kubectl -n ft get pods,svc,ingress,externalsecret
 kubectl -n ft get cluster.postgresql.cnpg.io ft-postgres
-kubectl -n ft get secret environment-credentials   # generated by the controller from the SealedSecret
+kubectl -n ft get secret environment-credentials   # materialized by ESO from OpenBao
 ```
 
-## Sealing new secrets
-
-When you need to add or update credentials:
-
-```sh
-# 1. create the plaintext Secret manifest temporarily (DO NOT commit)
-cat > /tmp/secret.yaml <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: environment-credentials
-  namespace: ft
-type: Opaque
-stringData:
-  SECRET_KEY: "..."
-  FIRST_SUPERUSER: "..."
-  FIRST_SUPERUSER_PASSWORD: "..."
-EOF
-
-# 2. seal against the controller's public key
-kubeseal --format yaml \
-  --controller-namespace kube-system \
-  --controller-name sealed-secrets-controller \
-  < /tmp/secret.yaml \
-  > apps/fullstack-template/overlays/local/sealed-secret.yaml
-
-# 3. discard the plaintext file and apply
-rm /tmp/secret.yaml
-kubectl apply -k apps/fullstack-template/overlays/local/
-```
-
-The public certificate can also be exported with `kubeseal --fetch-cert > pub.pem` to seal offline.
+If the `ExternalSecret` shows `SecretSyncedError`, check `kubectl -n ft describe externalsecret environment-credentials` — most failures are a missing key in OpenBao or a policy that doesn't grant read on the path.
