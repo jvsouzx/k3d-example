@@ -1,0 +1,49 @@
+global:
+  enabled: true
+  tlsDisable: true
+
+server:
+  image:
+    repository: openbao/openbao
+    tag: 2.4.1
+
+  dataStorage:
+    enabled: true
+    size: 1Gi
+    mountPath: /openbao/data
+    accessMode: ReadWriteOnce
+
+  standalone:
+    enabled: true
+    config: |
+      ui = true
+
+      listener "tcp" {
+        address     = "[::]:8200"
+        cluster_address = "[::]:8201"
+        tls_disable = 1
+      }
+
+      storage "file" {
+        path = "/openbao/data"
+      }
+
+  ha:
+    enabled: false
+  dev:
+    enabled: false
+
+  service:
+    enabled: true
+    type: ClusterIP
+
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts:
+      - host: bao.local
+        paths:
+          - /
+
+ui:
+  enabled: true

@@ -18,6 +18,7 @@ hostAliases:
     hostnames:
       - app.template.local
       - api.template.local
+      - bao.local
 registries:
   create:
     name: registry.localhost
