@@ -22,7 +22,7 @@ apps/
 └── README.md
 ```
 
-`base/` holds the generic resources (namespace, configmap, deployments, ingress, CNPG Cluster). `overlays/local/` extends the base and adds the `ExternalSecret`, which lives in the overlay because the OpenBao path it pulls from is environment-specific.
+`base/` holds the generic resources (namespace, configmap, deployments, ingress, CNPG Cluster). `overlays/local/` extends the base and adds the `ExternalSecret`, which lives in the overlay because the Infisical project/environment it pulls from is environment-specific.
 
 ## 1. Build the images
 
@@ -64,18 +64,18 @@ k3d image import ft-frontend:latest ft-backend:latest -c local
 ```
 127.0.0.1 app.template.local
 127.0.0.1 api.template.local
-127.0.0.1 bao.local
+127.0.0.1 infisical.local
 ```
 
 The k3d loadbalancer maps `8080:80`, so use:
 
 - Frontend: <http://app.template.local:8080>
 - API: <http://api.template.local:8080>
-- OpenBao UI: <http://bao.local:8080>
+- Infisical UI: <http://infisical.local:8080>
 
 ## 3. Cluster bootstrap (once per cluster)
 
-Installs the CloudNativePG operator, defined in [../clusters/local/bootstrap/kustomization.yaml](../clusters/local/bootstrap/kustomization.yaml):
+Installs the CloudNativePG and Dragonfly operators, defined in [../clusters/local/bootstrap/kustomization.yaml](../clusters/local/bootstrap/kustomization.yaml):
 
 ```sh
 kubectl apply -k clusters/local/bootstrap/ --server-side
@@ -83,121 +83,104 @@ kubectl apply -k clusters/local/bootstrap/ --server-side
 
 `--server-side` is required because the CNPG CRDs are large enough to exceed the 256 KB annotation limit of client-side apply.
 
-## 4. Secrets management: OpenBao + ESO
+## 4. Secrets management: Infisical + ESO
 
-Secrets live in OpenBao and are synced into native `Secret`s by [External Secrets Operator](https://external-secrets.io). OpenBao's Helm values (Standalone, file storage, UI, Ingress at `bao.local`) live in [../clusters/local/bootstrap/openbao/values.yaml](../clusters/local/bootstrap/openbao/values.yaml).
+Secrets live in a self-hosted [Infisical](https://infisical.com) and are synced into native `Secret`s by [External Secrets Operator](https://external-secrets.io). The bundled Postgres/Redis are disabled — Postgres comes from a **CNPG `Cluster`** and Redis from a **Dragonfly** instance, matching the production stack. Infisical's Helm values live in [../clusters/local/bootstrap/infisical/values.yaml](../clusters/local/bootstrap/infisical/values.yaml).
 
-### 4.1 Install ESO and OpenBao
+### 4.1 Install ESO
 
 ```sh
-# ESO
 helm repo add external-secrets https://charts.external-secrets.io
 helm install external-secrets external-secrets/external-secrets \
   -n external-secrets --create-namespace --version 0.20.4
+```
 
-# OpenBao
-helm repo add openbao https://openbao.github.io/openbao-helm
+### 4.2 Provision Infisical's datastores (CNPG + Dragonfly)
+
+```sh
+kubectl create namespace infisical
+kubectl apply -f clusters/local/bootstrap/infisical/postgres.yaml
+kubectl apply -f clusters/local/bootstrap/infisical/dragonfly.yaml
+
+# wait for both to be ready
+kubectl -n infisical wait --for=condition=Ready cluster/infisical-postgres --timeout=300s
+kubectl -n infisical rollout status statefulset/infisical-dragonfly
+```
+
+CNPG generates the `infisical-postgres-app` Secret (with a ready-made `uri`); Dragonfly exposes a Service `infisical-dragonfly:6379` with the password from [dragonfly.yaml](../clusters/local/bootstrap/infisical/dragonfly.yaml).
+
+### 4.3 Create the Infisical platform Secret
+
+Not committed — built per cluster, and `DB_CONNECTION_URI` depends on the password CNPG just generated:
+
+```sh
+DB_URI=$(kubectl -n infisical get secret infisical-postgres-app \
+  -o jsonpath='{.data.uri}' | base64 -d)
+
+kubectl -n infisical create secret generic infisical-secrets \
+  --from-literal=AUTH_SECRET="$(openssl rand -base64 32)" \
+  --from-literal=ENCRYPTION_KEY="$(openssl rand -hex 16)" \
+  --from-literal=SITE_URL="http://infisical.local:8080" \
+  --from-literal=DB_CONNECTION_URI="$DB_URI" \
+  --from-literal=REDIS_URL="redis://:infisical@infisical-dragonfly.infisical.svc.cluster.local:6379"
+```
+
+### 4.4 Install Infisical
+
+```sh
+helm repo add infisical-helm-charts \
+  https://dl.cloudsmith.io/public/infisical/helm-charts/helm/charts/
 helm repo update
-helm install openbao openbao/openbao \
-  -n openbao --create-namespace \
-  -f clusters/local/bootstrap/openbao/values.yaml
-
-# Grant OpenBao's SA permission to call TokenReview (required by Kubernetes auth)
-kubectl apply -f clusters/local/bootstrap/openbao/auth-delegator.yaml
+helm install infisical infisical-helm-charts/infisical-standalone \
+  -n infisical \
+  -f clusters/local/bootstrap/infisical/values.yaml
 ```
 
-### 4.2 Initialize and unseal OpenBao
-
-The `openbao-0` pod stays `0/1` Ready until you init and unseal:
+Wait until the Infisical backend pods are `Running` (a migration Job runs against the CNPG database first):
 
 ```sh
-# init — prints 5 unseal keys + the initial root token. SAVE THEM.
-kubectl -n openbao exec -ti openbao-0 -- bao operator init
-
-# unseal — repeat 3 times with 3 distinct keys
-kubectl -n openbao exec -ti openbao-0 -- bao operator unseal
+kubectl -n infisical get pods -w
 ```
 
-After the 3rd unseal the pod flips to `1/1` Ready and the UI is reachable at <http://bao.local:8080>.
+### 4.5 First-run setup in the Infisical UI
 
-> The file backend persists data in the PVC, but the unseal keys are **not** stored anywhere by OpenBao — losing them means losing the data. Back them up (password manager, KMS). For production, switch to auto-unseal with a cloud KMS.
+Open <http://infisical.local:8080> and complete the initial admin account form (first signup becomes the instance admin — there is no default password).
 
-### 4.3 Configure OpenBao (KV engine, Kubernetes auth, ESO role)
+Then, inside the app:
 
-Open a shell inside the pod and log in with the root token:
+1. **Create a project** — name it so the slug is `fullstack-template` (must match `projectSlug` in the `ClusterSecretStore`). Verify the slug under Project Settings.
+2. **Pick the `dev` environment** (created by default) — matches `environmentSlug`.
+3. **Add the app secrets** at the root path `/`:
+   - `SECRET_KEY` — value: run `openssl rand -hex 32` on your host and paste
+   - `FIRST_SUPERUSER` — e.g. `admin@example.com`
+   - `FIRST_SUPERUSER_PASSWORD` — e.g. `changeme`
+   - `SMTP_USER` — empty
+   - `SMTP_PASSWORD` — empty
+
+### 4.6 Create a Machine Identity for ESO
+
+ESO authenticates to Infisical with a Machine Identity using Universal Auth:
+
+1. Organization Settings → **Access Control → Machine Identities → Create**. Auth method: **Universal Auth**.
+2. Add it to the `fullstack-template` project with at least **read** access to the `dev` environment.
+3. Copy the **Client ID** and **Client Secret**, then store them where the `ClusterSecretStore` expects them:
 
 ```sh
-kubectl -n openbao exec -ti openbao-0 -- sh
-bao login <root_token>
+kubectl -n external-secrets create secret generic universal-auth-credentials \
+  --from-literal=clientId="<client_id>" \
+  --from-literal=clientSecret="<client_secret>"
 ```
 
-Then, inside the pod:
+### 4.7 Apply the `ClusterSecretStore`
 
 ```sh
-# KV v2 engine at path "secret/"
-bao secrets enable -version=2 -path=secret kv
-
-# Kubernetes auth (uses the pod's SA token to call TokenReview)
-bao auth enable kubernetes
-bao write auth/kubernetes/config \
-  kubernetes_host="https://kubernetes.default.svc.cluster.local"
-
-# Policy: read-only access to secret/data/ft/*
-bao policy write eso-reader - <<EOF
-path "secret/data/ft/*" {
-  capabilities = ["read"]
-}
-EOF
-
-# Role: bind ESO's ServiceAccount to the eso-reader policy
-bao write auth/kubernetes/role/eso \
-  bound_service_account_names=external-secrets \
-  bound_service_account_namespaces=external-secrets \
-  policies=eso-reader \
-  ttl=1h
-
-exit
+kubectl apply -f clusters/local/bootstrap/infisical/cluster-secret-store.yaml
+kubectl get clustersecretstore infisical   # STATUS should become "Valid"
 ```
 
-### 4.4 Apply the `ClusterSecretStore`
+If status stays `InvalidProviderConfig`, check `kubectl -n external-secrets logs deploy/external-secrets` — usually a wrong `hostAPI`, a slug mismatch (`projectSlug`/`environmentSlug`), or the Machine Identity lacking access to the project.
 
-```sh
-kubectl apply -f clusters/local/bootstrap/openbao/cluster-secret-store.yaml
-kubectl get clustersecretstore openbao   # STATUS should become "Valid"
-```
-
-If status stays `InvalidProviderConfig`, check `kubectl -n external-secrets logs deploy/external-secrets` — usually a wrong `server` URL, missing `auth-delegator` binding, or a mismatched role/policy.
-
-### 4.5 Seed the app secrets
-
-The app expects 5 keys at `secret/ft/app` (consumed via `envFrom: secretRef: environment-credentials`).
-
-Generate the `SECRET_KEY` **on the host** (the OpenBao image has no `openssl`):
-
-```sh
-SECRET_KEY=$(openssl rand -hex 32)
-echo "$SECRET_KEY"   # copy this
-```
-
-Then, inside the pod:
-
-```sh
-kubectl -n openbao exec -ti openbao-0 -- sh
-bao login <root_token>
-
-bao kv put secret/ft/app \
-  SECRET_KEY="<paste_here>" \
-  FIRST_SUPERUSER="admin@example.com" \
-  FIRST_SUPERUSER_PASSWORD="changeme" \
-  SMTP_USER="" \
-  SMTP_PASSWORD=""
-
-exit
-```
-
-> Shell substitution like `$(openssl ...)` runs **inside** the pod, where `openssl` is absent — it would silently produce an empty `SECRET_KEY`. Generate on the host, paste the literal.
-
-To update later, repeat `bao kv put` (replaces all keys) or use `bao kv patch` (merges).
+> `hostAPI` in the `ClusterSecretStore` points at the in-cluster Service `infisical-infisical.infisical.svc.cluster.local:8080`. Confirm the name with `kubectl -n infisical get svc` if ESO can't reach it.
 
 ## 5. Deploy the application
 
@@ -210,7 +193,7 @@ Verify:
 ```sh
 kubectl -n ft get pods,svc,ingress,externalsecret
 kubectl -n ft get cluster.postgresql.cnpg.io ft-postgres
-kubectl -n ft get secret environment-credentials   # materialized by ESO from OpenBao
+kubectl -n ft get secret environment-credentials   # materialized by ESO from Infisical
 ```
 
-If the `ExternalSecret` shows `SecretSyncedError`, check `kubectl -n ft describe externalsecret environment-credentials` — most failures are a missing key in OpenBao or a policy that doesn't grant read on the path.
+If the `ExternalSecret` shows `SecretSyncedError`, check `kubectl -n ft describe externalsecret environment-credentials` — most failures are a slug mismatch or the Machine Identity not having access to the `dev` environment.

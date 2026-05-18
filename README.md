@@ -1,6 +1,6 @@
 # k3d example
 
-Minimal [k3d](https://k3d.io) cluster config plus a sample app deployed via Kustomize, with secrets managed by OpenBao + External Secrets Operator.
+Minimal [k3d](https://k3d.io) cluster config plus a sample app deployed via Kustomize, with secrets managed by Infisical + External Secrets Operator.
 
 > Requires Linux and Docker ≥ 20.0.0.
 
@@ -8,10 +8,10 @@ Minimal [k3d](https://k3d.io) cluster config plus a sample app deployed via Kust
 
 ```
 .
-├── clusters/local/         # k3d config + cluster bootstrap (CNPG, OpenBao, ESO)
+├── clusters/local/         # k3d config + cluster bootstrap (CNPG, Infisical, ESO)
 │   ├── bootstrap/
 │   │   ├── kustomization.yaml
-│   │   └── openbao/        # OpenBao Helm values + RBAC + ClusterSecretStore
+│   │   └── infisical/      # Infisical Helm values + ClusterSecretStore
 │   └── local.yaml
 └── apps/                   # applications deployed to the cluster
     └── fullstack-template/
@@ -37,7 +37,7 @@ wget https://github.com/derailed/k9s/releases/latest/download/k9s_linux_amd64.de
   && sudo apt install ./k9s_linux_amd64.deb \
   && rm k9s_linux_amd64.deb
 
-# helm (used to install OpenBao and External Secrets Operator)
+# helm (used to install Infisical and External Secrets Operator)
 curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
 sudo apt-get install apt-transport-https --yes
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" \
@@ -53,7 +53,7 @@ k3d cluster create --config clusters/local/local.yaml
 
 k3d merges the new context into `~/.kube/config` and switches to it. List or swap contexts with `kubectx`.
 
-Once the cluster is up, see [apps/README.md](apps/README.md) for the bootstrap (CNPG operator, OpenBao, External Secrets Operator) and the application deploy flow.
+Once the cluster is up, see [apps/README.md](apps/README.md) for the bootstrap (CNPG operator, Infisical, External Secrets Operator) and the application deploy flow.
 
 Delete the cluster when done:
 
