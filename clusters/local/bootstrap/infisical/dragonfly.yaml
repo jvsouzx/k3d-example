@@ -1,0 +1,9 @@
+apiVersion: dragonflydb.io/v1alpha1
+kind: Dragonfly
+metadata:
+  name: infisical-dragonfly
+  namespace: infisical
+spec:
+  replicas: 1
+  args:
+    - "--requirepass=infisical"

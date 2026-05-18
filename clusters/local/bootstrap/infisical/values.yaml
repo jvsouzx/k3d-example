@@ -1,0 +1,23 @@
+infisical:
+  image:
+    repository: infisical/infisical
+    tag: "v0.151.0"
+  replicaCount: 1
+  # AUTH_SECRET, ENCRYPTION_KEY, SITE_URL, DB_CONNECTION_URI and REDIS_URL
+  # all come from the infisical-secrets Secret created out-of-band
+  # (Postgres via CNPG, Redis via Dragonfly — see apps/README.md).
+  kubeSecretRef: infisical-secrets
+
+# Postgres is provided by a CNPG Cluster, Redis by a Dragonfly instance.
+postgresql:
+  enabled: false
+
+redis:
+  enabled: false
+
+ingress:
+  enabled: true
+  ingressClassName: traefik
+  hostName: infisical.local
+  nginx:
+    enabled: false
