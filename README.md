@@ -8,11 +8,11 @@ Minimal [k3d](https://k3d.io) cluster config plus a sample app deployed via Kust
 
 ```
 .
-├── clusters/local/         # k3d config + cluster bootstrap (CNPG, Infisical, ESO)
-│   ├── bootstrap/
+├── clusters/local/         # k3d cluster config + bootstrap
+│   ├── bootstrap/          # CNPG + Dragonfly operators (kustomize)
 │   │   ├── kustomization.yaml
-│   │   └── infisical/      # Infisical Helm values + ClusterSecretStore
-│   └── local.yaml
+│   │   └── infisical/      # Infisical Helm values, CNPG/Dragonfly datastores, ClusterSecretStore
+│   └── local.yaml          # k3d cluster config
 └── apps/                   # applications deployed to the cluster
     └── fullstack-template/
         ├── base/
