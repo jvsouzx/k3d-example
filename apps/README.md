@@ -167,8 +167,8 @@ ESO authenticates to Infisical with a Machine Identity using Universal Auth:
 
 ```sh
 kubectl -n external-secrets create secret generic universal-auth-credentials \
-  --from-literal=clientId="<client_id>" \
-  --from-literal=clientSecret="<client_secret>"
+  --from-literal=clientId="f127bb9b-2ed4-42b6-8d9c-33b3acb82deb" \
+  --from-literal=clientSecret="84c5bf7c7f036e43ab16d99cc9902fb4bc41d6c7fdbf6fe1a63a6dd1bce1bfca"
 ```
 
 ### 4.7 Apply the `ClusterSecretStore`
@@ -180,7 +180,7 @@ kubectl get clustersecretstore infisical   # STATUS should become "Valid"
 
 If status stays `InvalidProviderConfig`, check `kubectl -n external-secrets logs deploy/external-secrets` — usually a wrong `hostAPI`, a slug mismatch (`projectSlug`/`environmentSlug`), or the Machine Identity lacking access to the project.
 
-> `hostAPI` in the `ClusterSecretStore` points at the in-cluster Service `infisical-infisical.infisical.svc.cluster.local:8080`. Confirm the name with `kubectl -n infisical get svc` if ESO can't reach it.
+> `hostAPI` in the `ClusterSecretStore` points at the in-cluster Service `infisical-infisical-standalone-infisical.infisical.svc.cluster.local:8080`. Confirm the name with `kubectl -n infisical get svc` if ESO can't reach it.
 
 ## 5. Deploy the application
 

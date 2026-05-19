@@ -7,3 +7,7 @@ spec:
   replicas: 1
   args:
     - "--requirepass=infisical"
+    # Infisical uses BullMQ, whose Lua scripts access keys not declared in
+    # KEYS[]. Dragonfly rejects undeclared keys by default, crashing the
+    # Infisical backend. This flag restores Redis-compatible behavior.
+    - "--default_lua_flags=allow-undeclared-keys"
