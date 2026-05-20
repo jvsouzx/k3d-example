@@ -1,0 +1,38 @@
+image:
+  tag: "1.36.0-alpine"
+
+replicas: 1
+
+database:
+  type: postgresql
+  existingSecret: vaultwarden-pg-app
+  existingSecretKey: uri
+
+adminToken:
+  existingSecret: vaultwarden-admin
+  existingSecretKey: ADMIN_TOKEN
+
+domain: "https://vaultwarden.local:8443"
+
+signupsAllowed: true
+signupsVerify: "false"
+
+storage:
+  data:
+    name: vaultwarden-data
+    size: 1Gi
+    path: /data
+    accessMode: ReadWriteOnce
+
+ingress:
+  enabled: true
+  class: "traefik"
+  hostname: "vaultwarden.local"
+  tls: true
+  tlsSecret: "vaultwarden-tls"
+  nginxIngressAnnotations: false
+  path: "/"
+  pathType: "Prefix"
+
+pushNotifications:
+  enabled: false

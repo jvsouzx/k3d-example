@@ -19,6 +19,7 @@ hostAliases:
       - app.template.local
       - api.template.local
       - bao.local
+      - vaultwarden.local
 registries:
   create:
     name: registry.localhost
