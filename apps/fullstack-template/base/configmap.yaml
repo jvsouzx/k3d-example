@@ -16,10 +16,3 @@ data:
   SMTP_TLS: "True"
   SMTP_SSL: "False"
   SMTP_PORT: "587"
-
-  # POSTGRES_SERVER: ""
-  # POSTGRES_PORT: ""
-  # POSTGRES_DB: "app"
-  # POSTGRES_USER: "postgres"
-  # POSTGRES_PASSWORD: ""
-  
