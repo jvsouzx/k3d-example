@@ -11,10 +11,13 @@ Minimal [k3d](https://k3d.io) cluster config plus a sample app deployed via Kust
 ├── clusters/local/         # k3d config + cluster bootstrap (CNPG, OpenBao, ESO)
 │   ├── bootstrap/
 │   │   ├── kustomization.yaml
-│   │   └── openbao/        # OpenBao Helm values + RBAC + ClusterSecretStore
+│   │   └── openbao/        # OpenBao Helm values + CNPG cluster + RBAC + ClusterSecretStore
 │   └── local.yaml
 └── apps/                   # applications deployed to the cluster
-    └── fullstack-template/
+    ├── fullstack-template/  # FastAPI + React, custom images
+    │   ├── base/
+    │   └── overlays/local/
+    └── vaultwarden/         # community Helm chart, CNPG + ESO
         ├── base/
         └── overlays/local/
 ```
