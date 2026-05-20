@@ -8,28 +8,33 @@ server:
     tag: 2.4.1
 
   dataStorage:
-    enabled: true
-    size: 1Gi
-    mountPath: /openbao/data
-    accessMode: ReadWriteOnce
+    enabled: false
+
+  extraSecretEnvironmentVars:
+    - envName: BAO_PG_CONNECTION_URL
+      secretName: openbao-pg-app
+      secretKey: uri
+    - envName: OPENBAO_UNSEAL_KEY
+      secretName: openbao-unseal
+      secretKey: key
 
   standalone:
     enabled: true
     config: |
       ui = true
-
       listener "tcp" {
-        address     = "[::]:8200"
+        address         = "[::]:8200"
         cluster_address = "[::]:8201"
-        tls_disable = 1
+        tls_disable     = 1
+      }
+      storage "postgresql" {
+        table = "openbao_kv_store"
+      }
+      seal "static" {
+        current_key_id = "local-1"
+        current_key    = "env://OPENBAO_UNSEAL_KEY"
       }
 
-      storage "file" {
-        path = "/openbao/data"
-      }
-
-  ha:
-    enabled: false
   dev:
     enabled: false
 
